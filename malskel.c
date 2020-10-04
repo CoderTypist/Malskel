@@ -1,10 +1,15 @@
 // Author: Christian Bargraser
 
-// Error messages will not be included in the final version
-// The host should not get these messages
+// Before deployment:
+// - set bDebug to false
+
+// To make static binary analysis more difficult consider:
+// - removing all print statements
+// - getting rid of the usage function
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -15,16 +20,23 @@
 #define MONITOR 2
 #define PAYLOAD 3
 
+#define DEBUG if( true == bDebug )
+bool bDebug = true;
+
 void* monitor(void *arg);
 void* payload(void *arg);
+void usage();
 
 int main(int argc, char *argv[]) {
 
     // a mode must be provided    
     if( argc <= 1 ) {
 
-        // -- remove later --
-        printf("\nNot enough arguments\n");
+        DEBUG { 
+            printf("Not enough arguments\n\n");
+            usage();
+        }
+
         exit(-1);
     }
 
@@ -45,26 +57,22 @@ int main(int argc, char *argv[]) {
 
     else {
 
-        // -- remove later --
-        printf("Invalid strMode\n");
-
+        DEBUG printf("Invalid mode: %s\n", argv[1]);
         exit(-1);
     }
-
-    pthread_t tid_payload;
-    pthread_t tid_monitor;
     
     // action to take based on the mode
     if( LAUNCH == iMode ) {
 
-        fprintf(stderr, "\n  -- LAUNCH -- \n");
+        DEBUG fprintf(stderr, "Mode: LAUNCH\n");
 
+        pthread_t tid_payload;
+        pthread_t tid_monitor;
         pid_t pid = fork();
 
         if( pid < 0 ) {
             
-            // -- remove later --
-            fprintf(stderr, "\nFork failed\n");
+            DEBUG fprintf(stderr, "\nFork failed\n");
             exit(-1);
         }
 
@@ -75,10 +83,12 @@ int main(int argc, char *argv[]) {
 
             // execute the payload
             pthread_create(&tid_payload, (void*)NULL, payload, (void*)NULL);
+            DEBUG fprintf(stderr, "Thread (payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
 
             // monitor the parent
             pid_t pid_parent = getppid();
             pthread_create(&tid_monitor, (void*)NULL, monitor, &pid_parent);
+            DEBUG fprintf(stderr, "Thread (payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
 
             pthread_join(tid_payload, (void*)NULL);
             pthread_join(tid_monitor, (void*)NULL);
@@ -91,6 +101,7 @@ int main(int argc, char *argv[]) {
 
             // monitor the child (payload)
             pthread_create(&tid_monitor, (void*)NULL, monitor, &pid);
+            DEBUG fprintf(stderr, "Thread (monitor->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
             pthread_join(tid_monitor, (void*)NULL);
 
             while( -1 != wait(NULL) );
@@ -99,25 +110,23 @@ int main(int argc, char *argv[]) {
 
     else if ( MONITOR == iMode && argc >= 3 ) {
 
-        fprintf(stderr, "\n  -- MONITOR -- \n");
-
-        pthread_t pid_monitor = (pid_t)atoi(argv[2]);
-        pthread_create(&tid_monitor, (void*)NULL, monitor, &pid_monitor);
-        pthread_join(tid_monitor, NULL);
+        DEBUG fprintf(stderr, "Mode: MONITOR\n");
+        pid_t pid_monitor = (pid_t)atoi(argv[2]);
+        monitor(&pid_monitor);
     }
 
     else if ( PAYLOAD == iMode && argc >= 3 ) {
         
-        fprintf(stderr, "\n  -- PAYLOAD -- \n");
-
-        pthread_create(&tid_payload, (void*)NULL, payload, (void*)NULL);
-        pthread_join(tid_payload, NULL);
+        DEBUG fprintf(stderr, "Mode: PAYLOAD\n"); 
+        payload((void*)NULL);
     }
 
     else {
 
-        // -- remove later --
-        printf("Invalid iMode\n");
+        DEBUG {
+            printf("Invalid mode and/or arguments\n\n");
+            usage();
+        }
 
         exit(-1);
     }
@@ -125,12 +134,20 @@ int main(int argc, char *argv[]) {
 
 void* monitor(void *arg) {
     
-    fprintf(stderr, "I am the monitor\n");
+    pid_t pid_monitor = *((pid_t*)arg);
+    DEBUG fprintf(stderr, "Monitor: pid = %d -> pid = %d\n", getpid(), pid_monitor);
     return NULL;
 }
 
 void* payload(void *arg) {
 
-    fprintf(stderr, "I am the payload\n");
+    DEBUG fprintf(stderr, "Payload: pid = %d\n", getpid());
     return NULL;
+}
+
+void usage() {
+
+    printf("./malskel -l/--launch <payload_args>\n");
+    printf("./malskel -m/--monitor <pid_monitor> <payload_args>\n");
+    printf("./malskel -p/--payload <pid_monitor> <payload_args>\n");
 }
