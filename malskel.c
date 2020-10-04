@@ -57,18 +57,24 @@ int main(int argc, char *argv[]) {
 
     else {
 
-        DEBUG printf("Invalid mode: %s\n", argv[1]);
+        DEBUG {
+            printf("Invalid mode: %s\n\n", argv[1]);
+            usage();
+        }
+
         exit(-1);
     }
     
-    // action to take based on the mode
+    pthread_t tid_payload;
+    pthread_t tid_monitor;
+    pid_t pid;
+
+    // initial deployment
     if( LAUNCH == iMode ) {
 
         DEBUG fprintf(stderr, "Mode: LAUNCH\n");
 
-        pthread_t tid_payload;
-        pthread_t tid_monitor;
-        pid_t pid = fork();
+        pid = fork();
 
         if( pid < 0 ) {
             
@@ -83,12 +89,12 @@ int main(int argc, char *argv[]) {
 
             // execute the payload
             pthread_create(&tid_payload, (void*)NULL, payload, (void*)NULL);
-            DEBUG fprintf(stderr, "Thread (payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
+            DEBUG fprintf(stderr, "    Thread (LAUNCH: payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
 
             // monitor the parent
             pid_t pid_parent = getppid();
             pthread_create(&tid_monitor, (void*)NULL, monitor, &pid_parent);
-            DEBUG fprintf(stderr, "Thread (payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
+            DEBUG fprintf(stderr, "    Thread (LAUNCH: payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
 
             pthread_join(tid_payload, (void*)NULL);
             pthread_join(tid_monitor, (void*)NULL);
@@ -101,13 +107,14 @@ int main(int argc, char *argv[]) {
 
             // monitor the child (payload)
             pthread_create(&tid_monitor, (void*)NULL, monitor, &pid);
-            DEBUG fprintf(stderr, "Thread (monitor->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
+            DEBUG fprintf(stderr, "    Thread (LAUNCH: monitor->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
             pthread_join(tid_monitor, (void*)NULL);
 
             while( -1 != wait(NULL) );
         }
     }
 
+    // the invoking process should be the monitor from a process in PAYLOAD mode
     else if ( MONITOR == iMode && argc >= 3 ) {
 
         DEBUG fprintf(stderr, "Mode: MONITOR\n");
@@ -115,9 +122,23 @@ int main(int argc, char *argv[]) {
         monitor(&pid_monitor);
     }
 
+    // the invoking process should be the monitor from a process in MONITOR mode
     else if ( PAYLOAD == iMode && argc >= 3 ) {
         
         DEBUG fprintf(stderr, "Mode: PAYLOAD\n"); 
+
+        // execute the payload
+        pthread_create(&tid_payload, (void*)NULL, payload, (void*)NULL);
+        DEBUG fprintf(stderr, "    Thread (PAYLOAD: payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
+
+        // monitor the invoking process
+        pid_t pid_monitor = (pid_t)atoi(argv[2]);
+        pthread_create(&tid_monitor, (void*)NULL, monitor, &pid_monitor);
+        DEBUG fprintf(stderr, "    Thread (PAYLOAD: payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
+
+        pthread_join(tid_payload, (void*)NULL);
+        pthread_join(tid_monitor, (void*)NULL);
+
         payload((void*)NULL);
     }
 
