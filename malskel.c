@@ -18,8 +18,6 @@
 // lets monitor() know how to respond to a dead process
 #define MONITOR 1
 #define PAYLOAD 2
-
-// monitor() sleep time within spinlock
 #define NAP_TIME 0.25
 
 #define DEBUG if( true == bDebug )
@@ -37,15 +35,18 @@ typedef struct payload_args {
 
 void* monitor(void *arg);
 void* payload(void *arg);
-payload_args* get_payload_args(int argc, char *argv[]);
+payload_args* get_payload_args(int argc, char *argv[], int iStart);
 
 int main(int argc, char *argv[]) {
+
+    // Future versions of malskel may receive arguments and iUsed may change
+    // iUsed would need to be incremented as argv is parsed
+    // malskel currently does not receive any arguments
+    int iUsed = 0;
 
     pthread_t tid_payload;
     pthread_t tid_monitor;
     pid_t pid;
-
-    DEBUG fprintf(stderr, "Mode: LAUNCH\n");
 
     pid = fork();
 
@@ -59,7 +60,7 @@ int main(int argc, char *argv[]) {
     else if( 0 == pid ) {
 
         // execute the payload
-        pthread_create(&tid_payload, (void*)NULL, payload, (void*)get_payload_args(argc, argv));
+        pthread_create(&tid_payload, (void*)NULL, payload, (void*)get_payload_args(argc, argv, iUsed));
         DEBUG fprintf(stderr, "    Thread (payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
 
         // monitor the parent
@@ -149,7 +150,10 @@ void* payload(void *arg) {
     return NULL;
 }
 
-payload_args* get_payload_args(int argc, char *argv[]) {
+// iStart specifies which index from argv to start from
+// iUsed arearguments that were passed to malskel
+// the following arguments are intended for the payload
+payload_args* get_payload_args(int argc, char *argv[], int iUsed) {
 
     payload_args *ppa = (payload_args*)malloc(sizeof(payload_args));
 
@@ -158,16 +162,21 @@ payload_args* get_payload_args(int argc, char *argv[]) {
         exit(-1);
     }
 
+    // iPayloadArgs = argc - ( <1 for argv[0]> + <malskel args> )
+    int iPayloadArgs = argc - ( 1 + iUsed );
+
     // if there are no payload arguments
-    if( 1 == argc ) {
+    if( 0 == iPayloadArgs ) {
         ppa->argc = 0;
         ppa->argv = NULL;
         return ppa;
     }
 
+    // TODO: Keep on working from here
+
     // char** that will point to payload arguments in argv
     fprintf(stderr, "argc: %d\n", argc);
-    char** p_argv = (char**)malloc( (argc-1) * sizeof(char*) );
+    char** p_argv = (char**)malloc( iPayloadArgs * sizeof(char*) );
 
     if( NULL == p_argv ) {
         DEBUG fprintf(stderr, "Error: Malloc for p_argv failed\n");
@@ -175,13 +184,16 @@ payload_args* get_payload_args(int argc, char *argv[]) {
     }
 
     // make the char** point to the arguments in argv
+
+    // argv[0] + iUsed = starting index of payload args
+    int iOffset = 1 + iUsed;
     int i;
-    for( i = 0 ; i < argc-1 ; i++ ) {
-        p_argv[i] = argv[i+1];
-        // fprintf(stderr, "p_argv[%d] = %s\n", i, p_argv[i]);
+    for( i = 0 ; i < iPayloadArgs ; i++ ) {
+        p_argv[i] = argv[i+iOffset];
+        fprintf(stderr, "p_argv[%d] = %s\n", i, p_argv[i]);
     }
 
-    ppa->argc = argc-1;
+    ppa->argc = iPayloadArgs;
     ppa->argv = p_argv;
     
     return ppa;
