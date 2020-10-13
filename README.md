@@ -48,7 +48,7 @@ The blue squiggly line is the default thread. In subsequent images, red lines wi
 
 P1 will then fork.
 
-![Post Fork](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/02_Fork.jpg)
+![Post Fork](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/02_Post_Fork.jpg)
 
 P1 is placed in MONITOR mode and P1 is placed in PAYLOAD mode. 
 
