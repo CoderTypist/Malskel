@@ -2,8 +2,6 @@
 
 ### Description:
 
-Make a program "unkillable".
-
 Malskel is payload wrapper that makes a program "unkillable".
 
 ### Usage:
