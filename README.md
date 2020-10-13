@@ -1,12 +1,12 @@
 # Malskel
 
-### Description
+### Description:
 
 Make a program "unkillable".
 
 Malskel is payload wrapper that makes a program "unkillable".
 
-### Usage
+### Usage:
 
 Run ./comp to compile malskel.c
 
@@ -24,7 +24,7 @@ Feel free to adjust NAP_TIME.
 
 Feel free to set bDebug to false to disable console output. 
 
-### High Level Explanation
+### High Level Explanation:
 
 The process will fork. Each process will check on the other. 
 
@@ -38,7 +38,7 @@ If the process in MONITOR mode dies, the process in PAYLOAD mode will notice, fo
 
 If the process in PAYLOAD mode dies, the process in MONITOR mode will notice and fork. The child will switch to PAYLOAD mode and restart the payload.
 
-### Low Level Explanation
+### Low Level Explanation:
 
 Malskel is started. 
 
@@ -64,11 +64,11 @@ P2 will create a thread to start the payload.
 
 At this point, there are now two different scenarios:
 
-1) The process in MONITOR mode may be killed.
+1) The process in MONITOR mode gets killed.
 
-2) The process in PAYLOAD mode may be killed. 
+2) The process in PAYLOAD mode gets killed. 
 
-##### If the process in PAYLOAD mode (P2) gets killed. 
+##### If the process in PAYLOAD mode (P2) gets killed:
 
 Remember that P1 is in MONITOR mode and was using its default thread to monitor P2.
 
@@ -84,7 +84,7 @@ P1 will now start monitoring P3.
 
 ![Payload Process Death and Revival](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/05_Payload_Process_Death_and_Revival.jpg)
 
-##### If the process in MONITOR mode (P1) gets killed. 
+##### If the process in MONITOR mode (P1) gets killed:
 
 Remember that P2 is in PAYLOAD mode as was using one thread to monitor P1 and using the other thread to execute the payload.
 
