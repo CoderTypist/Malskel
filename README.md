@@ -4,6 +4,26 @@
 
 Make a program "unkillable".
 
+Malskel is payload wrapper that makes a program "unkillable".
+
+### Usage
+
+Run ./comp to compile malskel.c
+
+Run ./malskel
+
+Any arguments passed to malskel are passed to the payload.
+
+### Note:
+
+Processes will check on each other after NAP_TIME seconds elapse.
+
+NAP_TIME is set to 1.
+
+Feel free to adjust NAP_TIME.
+
+Feel free to set bDebug to false to disable console output. 
+
 ### High Level Explanation
 
 The process will fork. Each process will check on the other. 
@@ -22,17 +42,17 @@ If the process in PAYLOAD mode dies, the process in MONITOR mode will notice and
 
 Malskel is started. 
 
-The blue squiggly line is the default thread. 
+The blue squiggly line is the default thread. In subsequent images, red lines will represent threads created by pthread_create()
 
-// picture 01
+![Pre Fork](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/01_Pre_Fork.jpg)
 
 P1 will then fork.
 
-// picture 02
+![Post Fork](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/02_Fork.jpg)
 
 P1 is placed in MONITOR mode and P1 is placed in PAYLOAD mode. 
 
-// picture 03
+![Mode Assignment](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/03_Mode_Assignment.jpg)
 
 P1 will use its default thread to monitor P2.
 
@@ -40,7 +60,7 @@ P2 will create a thread to monitor P1.
 
 P2 will create a thread to start the payload. 
 
-// picture 04
+![Thread Creation](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/04_Thread_Creation.jpg)
 
 At this point, there are now two different scenarios:
 
@@ -62,7 +82,7 @@ P3 will create a new thread to restart the payload.
 
 P1 will now start monitoring P3.
 
-// image 05
+![Payload Process Death and Revival](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/05_Payload_Process_Death_and_Revival.jpg)
 
 ##### If the process in MONITOR mode (P1) gets killed. 
 
@@ -82,6 +102,4 @@ P2's monitor thread will now start monitoring P3.
 
 P3's monitor thread will now start monitoring P2.
 
-// image 06
-
-
+![Monitor Process Death and Revival](https://github.com/CoderTypist/Malskel/blob/master/Diagrams/06_Monitor_Process_Death_and_Revival.jpg)
